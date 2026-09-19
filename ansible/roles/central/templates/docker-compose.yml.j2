@@ -2,7 +2,7 @@
 #
 # central-monitoring no ofrece alta disponibilidad: es una única instancia
 # de cada componente. Si esta VM cae, se pierde observabilidad de AMBOS
-# clientes a la vez. Ver README, "Qué NO demuestra este laboratorio".
+# clientes a la vez.
 services:
   mimir:
     image: grafana/mimir:{{ lab.versions.mimir }}

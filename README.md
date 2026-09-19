@@ -2,7 +2,7 @@
 
 Vagrant + VirtualBox + Ansible: 7 VMs, dos clientes con LAN internas
 idénticas (`192.168.50.0/24`) y aisladas entre sí, monitorizados de forma
-centralizada con Grafana Alloy → Mimir/Loki → Grafana.
+centralizada con Grafana Alloy -> Mimir/Loki -> Grafana.
 
 ## Arquitectura
 
