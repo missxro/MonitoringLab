@@ -21,17 +21,14 @@ LAN A y LAN B son dos redes `intnet` de VirtualBox distintas (`lab-lan-a`,
 conecte entre sí ni con el host. `cliente-a-vm1` y `cliente-b-vm1`
 comparten IP (192.168.50.21) y nunca se ven.
 
-
 Direccionamiento, versiones y tamaño de cada VM viven en un único fichero,
 [`config/lab.yml`](config/lab.yml), leído directamente por el
 `Vagrantfile` y por Ansible.
 
+<img width="1580" height="440" alt="image" src="https://github.com/user-attachments/assets/920d37ac-ac36-4cb0-9a8a-acdde0b205aa" />
+
 ## Decisiones de red
 
-- **`intnet`, no `private_network` a secas.** Una hostonly normal se
-  registra a nivel de host y no admite CIDR duplicado. `virtualbox__intnet`
-  crea un switch puramente entre VMs, sin presencia en el host: por eso
-  LAN A y LAN B pueden compartir CIDR sin chocar.
 - **NIC1 (gestión de Vagrant).** Primer adaptador NAT que crea Vagrant
   siempre, antes de cualquier red del `Vagrantfile`. Solo se usa para
   SSH/Ansible/salida a Internet. Nada en el repo la referencia por nombre
