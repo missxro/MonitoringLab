@@ -1,0 +1,120 @@
+# =============================================================================
+# Fuente única de verdad del laboratorio.
+#
+# Este fichero lo leen DOS consumidores distintos, directamente, sin copias:
+#   - El Vagrantfile (Ruby), vía YAML.load_file, para crear las 7 VMs, sus
+#     redes y su tamaño.
+#   - Ansible (site.yml), vía vars_files, para configurar el software dentro
+#     de cada VM y renderizar la configuración de la central.
+#
+# Cambiar una IP, una versión o un tamaño de VM se hace UNA vez, aquí.
+# =============================================================================
+lab:
+
+  # ---------------------------------------------------------------------------
+  # Versiones explícitas de todo el software. Nunca "latest".
+  # Comprobadas contra los releases oficiales el 2026-09-19.
+  # ---------------------------------------------------------------------------
+  versions:
+    vagrant_box: "debian/bookworm64"     # Debian 12, box oficial mantenido por el Debian Cloud Team
+    alloy: "1.19.2"                      # Grafana Alloy (agente de métricas+logs en los clientes)
+    node_exporter: "1.12.1"              # prometheus/node_exporter
+    mimir: "3.2.1"                       # grafana/mimir (imagen docker)
+    loki: "3.7.8"                        # grafana/loki (imagen docker)
+    grafana: "13.2.2"                    # grafana/grafana-oss (imagen docker)
+    nginx: "1.31.6"                      # nginx (imagen docker, proxy central)
+    nginx_client_web: "1.26"             # nginx del paquete Debian, en cliente-*-vm1 (sitio demo)
+
+  # ---------------------------------------------------------------------------
+  # Direccionamiento. LAN A y LAN B comparten CIDR a propósito (192.168.50.0/24)
+  # y viven en segmentos virtuales aislados distintos (VirtualBox "intnet").
+  # ---------------------------------------------------------------------------
+  network:
+    transit:
+      cidr: "172.28.100.0/24"
+      intnet: "lab-transit"          # segmento intnet: central + los 2 gateways
+    lan_a:
+      cidr: "192.168.50.0/24"
+      intnet: "lab-lan-a"            # segmento intnet exclusivo del cliente A
+      gateway_ip: "192.168.50.1"
+    lan_b:
+      cidr: "192.168.50.0/24"
+      intnet: "lab-lan-b"            # segmento intnet exclusivo del cliente B (mismo CIDR, otro switch virtual)
+      gateway_ip: "192.168.50.1"
+    central_transit_ip: "172.28.100.10"
+    central_fqdn: "central-monitoring.lab"   # nombre usado en el SAN del certificado y en /etc/hosts de los clientes
+    proxy_https_port: 443
+
+  # ---------------------------------------------------------------------------
+  # Las 7 VMs. "ram_mb"/"cpus" están dimensionadas para un presupuesto total
+  # de ~8GB de RAM dedicados al laboratorio (perfil "mínimo recomendado").
+  # Sube estos valores si tienes más RAM disponible.
+  # ---------------------------------------------------------------------------
+  hosts:
+    central-monitoring:
+      role: central
+      ram_mb: 3072
+      cpus: 2
+      transit_ip: "172.28.100.10"
+
+    cliente-a-gateway:
+      role: gateway
+      ram_mb: 256
+      cpus: 1
+      transit_ip: "172.28.100.11"
+      lan: lan_a
+      lan_ip: "192.168.50.1"
+
+    cliente-b-gateway:
+      role: gateway
+      ram_mb: 256
+      cpus: 1
+      transit_ip: "172.28.100.12"
+      lan: lan_b
+      lan_ip: "192.168.50.1"
+
+    cliente-a-vm1:
+      role: client
+      cliente: cliente-a
+      ram_mb: 768
+      cpus: 1
+      lan: lan_a
+      lan_ip: "192.168.50.21"
+      nginx_web: true
+
+    cliente-a-vm2:
+      role: client
+      cliente: cliente-a
+      ram_mb: 640
+      cpus: 1
+      lan: lan_a
+      lan_ip: "192.168.50.22"
+      nginx_web: false
+
+    cliente-b-vm1:
+      role: client
+      cliente: cliente-b
+      ram_mb: 768
+      cpus: 1
+      lan: lan_b
+      lan_ip: "192.168.50.21"
+      nginx_web: true
+
+    cliente-b-vm2:
+      role: client
+      cliente: cliente-b
+      ram_mb: 640
+      cpus: 1
+      lan: lan_b
+      lan_ip: "192.168.50.22"
+      nginx_web: false
+
+  # ---------------------------------------------------------------------------
+  # Tenants de Mimir/Loki. El proxy central asigna uno de estos IDs según
+  # las credenciales autenticadas; nunca según lo que envíe el cliente.
+  # ---------------------------------------------------------------------------
+  tenants:
+    - cliente-a
+    - cliente-b
+
+  entorno_label: "lab"

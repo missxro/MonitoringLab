@@ -1,0 +1,68 @@
+#!/usr/sbin/nft -f
+# Generado por Ansible (rol "gateway") para {{ inventory_hostname }}. No editar a mano.
+#
+# Diseño: ninguna regla depende del NOMBRE de una interfaz (nunca se asume
+# eth1/eth2/enpXsY). Todo se filtra por IP/subred, así que es indiferente
+# cómo numere el kernel las NIC de esta VM.
+#
+# Reglas, en una frase: la LAN del cliente solo puede abrir conexiones
+# NUEVAS hacia la IP de la central y al puerto del proxy; todo lo demás
+# nuevo se descarta; las respuestas de conexiones ya establecidas siempre
+# se permiten en ambos sentidos.
+flush ruleset
+
+define TRANSIT_NET  = {{ lab.network.transit.cidr }}
+define LAN_NET       = {{ lab.network[my_lan].cidr }}
+define CENTRAL_IP    = {{ lab.network.central_transit_ip }}
+define PROXY_PORT    = {{ lab.network.proxy_https_port }}
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iif lo accept
+        ct state established,related accept
+
+        # NIC de gestión de Vagrant (NAT, sin nombre fijo): es la única vía
+        # de "vagrant ssh"/Ansible, así que su origen nunca puede ser la red
+        # de tránsito ni la LAN del cliente.
+        ip saddr != { $TRANSIT_NET, $LAN_NET } tcp dport 22 accept
+
+        # Ningún otro miembro de la red de tránsito (en concreto, el gateway
+        # del OTRO cliente, que comparte este mismo segmento intnet) puede
+        # dirigirse a este host. Solo la central puede.
+        ip saddr $TRANSIT_NET ip saddr != $CENTRAL_IP drop
+
+        # Diagnóstico local normal: los clientes de esta LAN sí pueden
+        # hablar con su propio gateway, y la central puede responder/hablar
+        # con este gateway.
+        ip saddr $LAN_NET accept
+        ip saddr $CENTRAL_IP accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+
+        ct state established,related accept
+
+        # Único flujo nuevo permitido: esta LAN -> central, al puerto del
+        # proxy HTTPS. No hay ninguna regla que permita tráfico nuevo en
+        # sentido central -> LAN, ni hacia la otra LAN (que ni siquiera es
+        # alcanzable desde este host).
+        ip saddr $LAN_NET ip daddr $CENTRAL_IP tcp dport $PROXY_PORT ct state new accept
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+
+table ip nat {
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        # SNAT/masquerade: todo lo que salga de la LAN hacia fuera de la
+        # LAN (en la práctica, hacia la central) sale con la IP de tránsito
+        # de este gateway.
+        ip saddr $LAN_NET ip daddr != $LAN_NET masquerade
+    }
+}

@@ -1,0 +1,49 @@
+---
+# Router/NAT de un cliente: forwarding IPv4 + SNAT hacia la central +
+# firewall que solo permite el flujo LAN->central:443 y bloquea cualquier
+# cosa iniciada desde la red de tránsito que no sea la propia central
+# (en particular, el gateway del otro cliente, que comparte el segmento
+# de tránsito a nivel de switch virtual).
+
+- name: my_lan = red LAN de este gateway (lan_a o lan_b)
+  set_fact:
+    my_lan: "{{ lab.hosts[inventory_hostname].lan }}"
+
+- name: Instalar nftables
+  apt:
+    name: nftables
+    state: present
+
+- name: Habilitar IPv4 forwarding ahora
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+    reload: true
+
+- name: Persistir IPv4 forwarding tras reinicio
+  copy:
+    dest: /etc/sysctl.d/99-lab-forwarding.conf
+    content: |
+      # Gestionado por Ansible (rol "gateway").
+      net.ipv4.ip_forward = 1
+    mode: "0644"
+
+- name: Renderizar el ruleset de nftables
+  template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0640"
+  notify: recargar nftables
+
+- name: Aplicar el ruleset inmediatamente (además de al reiniciar, vía el servicio)
+  command: nft -f /etc/nftables.conf
+  changed_when: false
+
+- name: nftables.service habilitado y arrancado (aplica /etc/nftables.conf en cada arranque)
+  systemd:
+    name: nftables
+    enabled: true
+    state: started

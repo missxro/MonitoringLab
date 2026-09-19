@@ -1,0 +1,15 @@
+#!/bin/sh
+# Gestionado por Ansible (rol "client_network"). No editar a mano.
+#
+# Añade una ruta explícita hacia la central a través del gateway de ESTA
+# LAN. Sin ella, el tráfico hacia {{ lab.network.central_transit_ip }}
+# intentaría salir por el adaptador NAT que Vagrant crea automáticamente
+# para SSH/provisioning (NIC1) -y fallaría, porque ese adaptador NAT no
+# tiene ninguna ruta hacia el resto de VMs del laboratorio.
+#
+# No se especifica interfaz de salida ("dev"): el kernel la resuelve solo
+# a partir de la puerta de enlace, que está en una red directamente
+# conectada. Así evitamos asumir un nombre de interfaz (eth1, ens192...)
+# que puede no ser el que realmente asigna esta VM.
+set -e
+ip route replace {{ lab.network.central_transit_ip }}/32 via {{ lab.network[lab.hosts[inventory_hostname].lan].gateway_ip }}

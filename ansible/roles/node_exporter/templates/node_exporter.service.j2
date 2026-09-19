@@ -1,0 +1,18 @@
+[Unit]
+Description=Prometheus Node Exporter ({{ lab.versions.node_exporter }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+# Solo localhost: lo único que lo consume es Alloy, en el mismo host.
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=127.0.0.1:9100
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,97 @@
+---
+# Playbook único del laboratorio. Se ejecuta desde el HOST (ver README,
+# "Provisioning: dónde corre Ansible") tras que Vagrant haya creado las 7 VMs.
+#
+# Toda la topología y todas las credenciales vienen de dos ficheros externos
+# al control de versiones de Ansible:
+#   - ../config/lab.yml                  (IPs, versiones, tamaños: versionado)
+#   - ../secrets/generated/tenants.yml   (credenciales: NUNCA versionado,
+#                                          generado por scripts/generate-secrets.sh)
+#
+# Cada rol es idempotente: volver a ejecutar "vagrant provision" no
+# regenera secretos, no reinicia servicios que ya están en el estado
+# deseado y no destruye datos persistentes (WAL de Alloy, volúmenes Docker).
+
+- name: Comprobar que los secretos del laboratorio existen
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: stat tenants.yml
+      stat:
+        path: "{{ playbook_dir }}/../secrets/generated/tenants.yml"
+      register: _tenants_file
+
+    - name: Fallar con instrucciones claras si faltan
+      fail:
+        msg: >-
+          Faltan los secretos del laboratorio. Ejecuta primero
+          ./scripts/generate-secrets.sh desde la raíz del repositorio y
+          vuelve a lanzar "vagrant provision".
+      when: not _tenants_file.stat.exists
+
+- name: Configuración base en todas las VMs
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+    - ../secrets/generated/tenants.yml
+  roles:
+    - common
+
+- name: Routers/NAT de cada cliente
+  hosts: gateways
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+  roles:
+    - gateway
+
+- name: node_exporter en las VMs de cliente
+  hosts: clientes
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+  roles:
+    - node_exporter
+
+- name: nginx de demo en las VM1 de cada cliente
+  hosts: web_vm1
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+  roles:
+    - nginx_web
+
+- name: Ruta explícita hacia la central, resolución de su nombre y CA del laboratorio
+  hosts: clientes
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+  roles:
+    - client_network
+
+- name: Grafana Alloy en las VMs de cliente
+  hosts: clientes
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+    - ../secrets/generated/tenants.yml
+  roles:
+    - alloy
+
+- name: Pila central de observabilidad (Docker Compose)
+  hosts: central
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config/lab.yml
+    - ../secrets/generated/tenants.yml
+  roles:
+    - central

@@ -1,0 +1,85 @@
+# Gestionado por Ansible (rol "central"). No editar a mano.
+#
+# Este proxy es la ÚNICA puerta de entrada de los clientes hacia Mimir y
+# Loki: sus puertos internos (9009 y 3100) no se publican en ningún otro
+# sitio. Solo expone dos rutas de escritura (una por backend), autenticadas
+# con credenciales por cliente, y asigna el tenant a partir de la
+# identidad autenticada, nunca de lo que el cliente diga en su propia
+# cabecera X-Scope-OrgID (que aquí se sobrescribe siempre).
+#
+# Grafana NO pasa por este proxy: habla con Mimir/Loki directamente por la
+# red interna de Docker Compose (ver docker-compose.yml.j2 y README), así
+# que aquí no hace falta ninguna ruta de consulta ni credencial de lectura.
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+
+    # Identidad autenticada (usuario de basic-auth) -> tenant. Esta tabla
+    # es la única fuente de verdad sobre qué tenant corresponde a cada
+    # credencial; nada de lo que envíe el cliente en la petición influye.
+    map $remote_user $tenant_id {
+{% for tenant in lab.tenants %}
+        "{{ tenant }}-ingest" "{{ tenant }}";
+{% endfor %}
+        default "";
+    }
+
+    server {
+        listen 443 ssl;
+        server_name {{ lab.network.central_fqdn }};
+
+        ssl_certificate     /etc/nginx/tls/server.crt;
+        ssl_certificate_key /etc/nginx/tls/server.key;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+
+        # Comprobación de conectividad TLS sin credenciales: la usan los
+        # scripts de validación para distinguir "no hay ruta hasta la
+        # central" de "hay ruta pero las credenciales fallan".
+        location = /healthz {
+            auth_basic off;
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        location = /mimir/api/v1/push {
+            auth_basic           "lab-monitoring ingest";
+            auth_basic_user_file /etc/nginx/auth/htpasswd-ingest;
+
+            if ($tenant_id = "") {
+                return 403;
+            }
+
+            proxy_set_header X-Scope-OrgID $tenant_id;
+            proxy_set_header Host $host;
+            proxy_pass http://mimir:9009/api/v1/push;
+        }
+
+        location = /loki/api/v1/push {
+            auth_basic           "lab-monitoring ingest";
+            auth_basic_user_file /etc/nginx/auth/htpasswd-ingest;
+
+            if ($tenant_id = "") {
+                return 403;
+            }
+
+            proxy_set_header X-Scope-OrgID $tenant_id;
+            proxy_set_header Host $host;
+            proxy_pass http://loki:3100/loki/api/v1/push;
+        }
+
+        # Cualquier otra ruta (en particular, cualquier intento de leer
+        # datos) no existe en este proxy.
+        location / {
+            return 404;
+        }
+    }
+}

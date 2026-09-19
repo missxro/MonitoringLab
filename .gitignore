@@ -1,0 +1,15 @@
+# Vagrant
+.vagrant/
+*.log
+
+# Secretos generados localmente (CA, certificados, contraseñas, htpasswd).
+# Se generan con scripts/generate-secrets.sh y NUNCA se versionan.
+secrets/
+
+# Ansible
+ansible/*.retry
+.vagrant/provisioners/ansible/inventory/
+
+# Editor / OS
+.DS_Store
+*.swp

@@ -1,0 +1,102 @@
+# Gestionado por Ansible (rol "central"). No editar a mano.
+#
+# central-monitoring no ofrece alta disponibilidad: es una única instancia
+# de cada componente. Si esta VM cae, se pierde observabilidad de AMBOS
+# clientes a la vez. Ver README, "Qué NO demuestra este laboratorio".
+services:
+  mimir:
+    image: grafana/mimir:{{ lab.versions.mimir }}
+    command: ["-config.file=/etc/mimir/mimir.yaml", "-target=all"]
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9009/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [monitoring]
+
+  loki:
+    image: grafana/loki:{{ lab.versions.loki }}
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./config/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [monitoring]
+
+  grafana:
+    image: grafana/grafana-oss:{{ lab.versions.grafana }}
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Grafana es una consola de administración interna, no un portal de
+      # clientes: solo se publica en loopback (ver "ports" abajo) y nunca
+      # a través del proxy 443 que sí alcanzan las LAN de los clientes.
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # Solo loopback de esta VM. Vagrant reenvía este puerto al host (ver
+      # Vagrantfile y README) para que puedas abrir Grafana en tu navegador;
+      # ninguna VM cliente tiene ruta hasta aquí.
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    depends_on:
+      mimir:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    networks: [monitoring]
+
+  proxy:
+    image: nginx:{{ lab.versions.nginx }}-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/auth/htpasswd-ingest:/etc/nginx/auth/htpasswd-ingest:ro
+      - ./tls/server.crt:/etc/nginx/tls/server.crt:ro
+      - ./tls/server.key:/etc/nginx/tls/server.key:ro
+    ports:
+      # Esta es la única puerta de entrada real del laboratorio: la
+      # alcanzan los dos gateways de cliente a través de la red de
+      # tránsito (172.28.100.10:443) y, por el adaptador NAT de Vagrant,
+      # también localhost del host (ver Vagrantfile: forwarded_port).
+      - "443:443"
+    depends_on:
+      mimir:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks: [monitoring]
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  mimir-data:
+  loki-data:
+  grafana-data:

@@ -1,0 +1,6 @@
+---
+- name: reaplicar ruta hacia la central
+  systemd:
+    name: lab-route.service
+    daemon_reload: true
+    state: restarted

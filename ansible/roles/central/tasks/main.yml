@@ -1,0 +1,123 @@
+---
+# Pila central: Docker Engine + Compose, y todo lo necesario para que
+# Mimir, Loki, Grafana y el proxy arranquen con configuración e
+# identidades ya resueltas (nada se genera "en caliente" dentro de la VM).
+
+- name: Paquetes de Docker (empaquetado por Debian, sin repo externo)
+  apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+
+- name: Docker habilitado y arrancado
+  systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Estructura de directorios en /opt/monitoring
+  file:
+    path: "/opt/monitoring/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - config
+    - nginx/auth
+    - tls
+    - grafana/provisioning/datasources
+    - grafana/provisioning/dashboards
+
+- name: Renderizar docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/monitoring/docker-compose.yml
+    mode: "0640"
+  register: _compose_file
+
+- name: Fichero .env con las credenciales de Grafana (no versionado, solo en la VM)
+  template:
+    src: env.j2
+    dest: /opt/monitoring/.env
+    mode: "0600"
+  register: _env_file
+
+- name: Renderizar mimir.yaml
+  template:
+    src: mimir/mimir.yaml.j2
+    dest: /opt/monitoring/config/mimir.yaml
+    mode: "0640"
+  notify: reiniciar mimir
+
+- name: Renderizar loki.yaml
+  template:
+    src: loki/loki.yaml.j2
+    dest: /opt/monitoring/config/loki.yaml
+    mode: "0640"
+  notify: reiniciar loki
+
+- name: Renderizar nginx.conf
+  template:
+    src: nginx/nginx.conf.j2
+    dest: /opt/monitoring/nginx/nginx.conf
+    mode: "0640"
+  notify: reiniciar proxy
+
+- name: Copiar htpasswd de ingesta (generado por scripts/generate-secrets.sh)
+  copy:
+    src: "{{ playbook_dir }}/../secrets/nginx/htpasswd-ingest"
+    dest: /opt/monitoring/nginx/auth/htpasswd-ingest
+    mode: "0640"
+  notify: reiniciar proxy
+
+- name: Copiar certificado y clave TLS de la central
+  copy:
+    src: "{{ playbook_dir }}/../secrets/pki/{{ item }}"
+    dest: "/opt/monitoring/tls/{{ item }}"
+    mode: "0600"
+  loop:
+    - server.crt
+    - server.key
+  notify: reiniciar proxy
+
+- name: Renderizar provisioning de datasources de Grafana
+  template:
+    src: grafana/provisioning/datasources/datasources.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/datasources/datasources.yml
+    mode: "0640"
+  notify: reiniciar grafana
+
+- name: Renderizar provider de dashboards de Grafana
+  template:
+    src: grafana/provisioning/dashboards/dashboards.yml.j2
+    dest: /opt/monitoring/grafana/provisioning/dashboards/dashboards.yml
+    mode: "0640"
+  notify: reiniciar grafana
+
+- name: Copiar el dashboard provisionado
+  copy:
+    src: grafana/provisioning/dashboards/lab-overview.json
+    dest: /opt/monitoring/grafana/provisioning/dashboards/lab-overview.json
+    mode: "0640"
+  notify: reiniciar grafana
+
+- name: Aplicar reinicios pendientes antes de (re)levantar la pila
+  meta: flush_handlers
+
+- name: Descargar las imágenes fijadas (no cambia nada si ya están)
+  command: docker compose pull
+  args:
+    chdir: /opt/monitoring
+  changed_when: false
+
+- name: Levantar la pila (Mimir, Loki, Grafana, proxy)
+  command: docker compose up -d --remove-orphans
+  args:
+    chdir: /opt/monitoring
+  register: _compose_up
+  changed_when: >-
+    'Started' in _compose_up.stderr or 'Created' in _compose_up.stderr or
+    'Recreated' in _compose_up.stderr or 'Started' in _compose_up.stdout or
+    'Created' in _compose_up.stdout or 'Recreated' in _compose_up.stdout

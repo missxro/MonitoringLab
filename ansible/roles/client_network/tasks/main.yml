@@ -1,0 +1,58 @@
+---
+- name: Resolución de central-monitoring en /etc/hosts
+  blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - lab-monitoring"
+    block: "{{ lab.network.central_transit_ip }} {{ lab.network.central_fqdn }}"
+
+- name: Instalar la CA del laboratorio en el almacén de confianza del sistema
+  copy:
+    src: "{{ playbook_dir }}/../secrets/pki/ca.crt"
+    dest: /usr/local/share/ca-certificates/lab-monitoring-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  register: _ca_copy
+
+- name: Refrescar el almacén de confianza (update-ca-certificates)
+  command: update-ca-certificates
+  when: _ca_copy.changed
+
+- name: Directorio de configuración del laboratorio (para que Alloy referencie la CA)
+  file:
+    path: /etc/monitoring-lab
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Copiar la CA también en una ruta fija que usa la config de Alloy
+  copy:
+    src: "{{ playbook_dir }}/../secrets/pki/ca.crt"
+    dest: /etc/monitoring-lab/ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Script que añade la ruta explícita hacia la central
+  template:
+    src: lab-route.sh.j2
+    dest: /usr/local/sbin/lab-route.sh
+    owner: root
+    group: root
+    mode: "0755"
+  notify: reaplicar ruta hacia la central
+
+- name: Unidad systemd que aplica esa ruta en cada arranque
+  template:
+    src: lab-route.service.j2
+    dest: /etc/systemd/system/lab-route.service
+    mode: "0644"
+  notify: reaplicar ruta hacia la central
+
+- name: Habilitar y arrancar lab-route.service
+  systemd:
+    name: lab-route.service
+    daemon_reload: true
+    enabled: true
+    state: started

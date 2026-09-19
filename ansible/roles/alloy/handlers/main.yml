@@ -1,0 +1,6 @@
+---
+- name: reiniciar alloy
+  systemd:
+    name: alloy
+    daemon_reload: true
+    state: restarted

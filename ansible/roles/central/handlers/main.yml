@@ -1,0 +1,23 @@
+---
+# --force-recreate funciona tanto si el contenedor ya existe (aplica la
+# config nueva de un fichero montado, que "docker compose up -d" a secas
+# no detecta por sí solo) como si todavía no existe (primer provisioning).
+- name: reiniciar mimir
+  command: docker compose up -d --force-recreate mimir
+  args:
+    chdir: /opt/monitoring
+
+- name: reiniciar loki
+  command: docker compose up -d --force-recreate loki
+  args:
+    chdir: /opt/monitoring
+
+- name: reiniciar grafana
+  command: docker compose up -d --force-recreate grafana
+  args:
+    chdir: /opt/monitoring
+
+- name: reiniciar proxy
+  command: docker compose up -d --force-recreate proxy
+  args:
+    chdir: /opt/monitoring

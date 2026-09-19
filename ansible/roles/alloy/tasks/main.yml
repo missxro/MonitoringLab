@@ -1,0 +1,94 @@
+---
+- name: mi_cliente = tenant al que pertenece esta VM
+  set_fact:
+    mi_cliente: "{{ lab.hosts[inventory_hostname].cliente }}"
+
+- name: Directorio para la clave del repositorio apt de Grafana
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Clave GPG del repositorio de Grafana
+  get_url:
+    url: https://apt.grafana.com/gpg-full.key
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+
+- name: Repositorio apt de Grafana (Alloy)
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main"
+    filename: grafana
+    state: present
+  register: _grafana_repo
+
+- name: Actualizar caché de apt tras añadir el repositorio
+  apt:
+    update_cache: true
+  when: _grafana_repo.changed
+
+- name: Resolver la revisión exacta del paquete para la versión {{ lab.versions.alloy }}
+  shell: |
+    set -o pipefail
+    apt-cache madison alloy | awk '{print $3}' | grep -m1 '^{{ lab.versions.alloy }}-'
+  args:
+    executable: /bin/bash
+  register: _alloy_pkg_version
+  changed_when: false
+
+- name: Fallar con un mensaje claro si esa versión no está en el repositorio
+  fail:
+    msg: >-
+      No se encuentra la versión {{ lab.versions.alloy }} de "alloy" en
+      apt.grafana.com. Revisa config/lab.yml (versions.alloy) o comprueba
+      "apt-cache madison alloy" en esta VM.
+  when: _alloy_pkg_version.stdout | length == 0
+
+- name: Instalar Alloy {{ lab.versions.alloy }}
+  apt:
+    name: "alloy={{ _alloy_pkg_version.stdout }}"
+    state: present
+    allow_downgrade: true
+  notify: reiniciar alloy
+
+- name: Añadir el usuario "alloy" a los grupos que necesita para leer journald y los logs de nginx
+  user:
+    name: alloy
+    groups:
+      - systemd-journal
+      - adm
+    append: true
+
+- name: Renderizar la configuración de Alloy
+  template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: root
+    mode: "0640"
+  notify: reiniciar alloy
+
+- name: Fichero de entorno de Alloy (ruta de config y de almacenamiento persistente del WAL)
+  copy:
+    dest: /etc/default/alloy
+    content: |
+      # Gestionado por Ansible (rol "alloy"). No editar a mano.
+      CONFIG_FILE="/etc/alloy/config.alloy"
+      CUSTOM_ARGS="--storage.path=/var/lib/alloy/data"
+    mode: "0644"
+  notify: reiniciar alloy
+
+- name: Directorio persistente de estado/WAL de Alloy, con permisos correctos
+  file:
+    path: /var/lib/alloy/data
+    state: directory
+    owner: alloy
+    group: alloy
+    mode: "0750"
+
+- name: Habilitar y arrancar Alloy
+  systemd:
+    name: alloy
+    daemon_reload: true
+    enabled: true
+    state: started

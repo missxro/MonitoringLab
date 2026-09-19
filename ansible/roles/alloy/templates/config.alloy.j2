@@ -1,0 +1,100 @@
+// Gestionado por Ansible (rol "alloy") para {{ inventory_hostname }}. No editar a mano.
+//
+// Credenciales de ingesta propias de "{{ mi_cliente }}": el tenant real lo
+// decide el proxy central a partir de estas credenciales, no de nada que
+// se envíe aquí. No hace falta declarar X-Scope-OrgID en este fichero.
+//
+// Identidad explícita por host: "instance" se fija a "{{ inventory_hostname }}"
+// en el propio target (no al valor por defecto "localhost:9100", que sería
+// idéntico en vm1 y vm2 de un mismo cliente y las confundiría en Grafana).
+
+prometheus.scrape "node" {
+  targets = [
+    {
+      "__address__" = "localhost:9100",
+      "job"         = "node",
+      "instance"    = "{{ inventory_hostname }}",
+      "cliente"     = "{{ mi_cliente }}",
+      "hostname"    = "{{ inventory_hostname }}",
+      "entorno"     = "{{ lab.entorno_label }}",
+    },
+  ]
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.central.receiver]
+}
+
+prometheus.remote_write "central" {
+  endpoint {
+    url = "https://{{ lab.network.central_fqdn }}/mimir/api/v1/push"
+
+    basic_auth {
+      username = "{{ tenant_secrets[mi_cliente].ingest_user }}"
+      password = "{{ tenant_secrets[mi_cliente].ingest_password }}"
+    }
+
+    tls_config {
+      ca_file = "/etc/monitoring-lab/ca.crt"
+    }
+  }
+
+  wal {
+    # Estado y WAL persistentes en /var/lib/alloy/data (ver
+    # /etc/default/alloy: --storage.path), con permisos del usuario "alloy".
+    truncate_frequency = "2h"
+  }
+}
+
+loki.write "central" {
+  endpoint {
+    url = "https://{{ lab.network.central_fqdn }}/loki/api/v1/push"
+
+    basic_auth {
+      username = "{{ tenant_secrets[mi_cliente].ingest_user }}"
+      password = "{{ tenant_secrets[mi_cliente].ingest_password }}"
+    }
+
+    tls_config {
+      ca_file = "/etc/monitoring-lab/ca.crt"
+    }
+  }
+}
+
+loki.source.journal "system" {
+  forward_to = [loki.write.central.receiver]
+  labels = {
+    job      = "journald",
+    cliente  = "{{ mi_cliente }}",
+    hostname = "{{ inventory_hostname }}",
+    entorno  = "{{ lab.entorno_label }}",
+  }
+}
+
+{% if lab.hosts[inventory_hostname].nginx_web %}
+// Esta VM es una VM1: además de journald, recoge access.log y error.log
+// de su nginx local.
+local.file_match "nginx" {
+  path_targets = [
+    {
+      "__path__"  = "/var/log/nginx/access.log",
+      "job"       = "nginx",
+      "log_type"  = "access",
+      "cliente"   = "{{ mi_cliente }}",
+      "hostname"  = "{{ inventory_hostname }}",
+      "entorno"   = "{{ lab.entorno_label }}",
+    },
+    {
+      "__path__"  = "/var/log/nginx/error.log",
+      "job"       = "nginx",
+      "log_type"  = "error",
+      "cliente"   = "{{ mi_cliente }}",
+      "hostname"  = "{{ inventory_hostname }}",
+      "entorno"   = "{{ lab.entorno_label }}",
+    },
+  ]
+}
+
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx.targets
+  forward_to = [loki.write.central.receiver]
+}
+{% endif %}

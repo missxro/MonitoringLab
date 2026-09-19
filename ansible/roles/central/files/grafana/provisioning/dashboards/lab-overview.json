@@ -1,0 +1,163 @@
+{
+  "uid": "lab-overview",
+  "title": "Laboratorio · Vista general por cliente",
+  "tags": ["lab-monitoring"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "mimir_ds",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Métricas (Mimir) · cliente",
+        "current": {},
+        "refresh": 1,
+        "hide": 0
+      },
+      {
+        "name": "loki_ds",
+        "type": "datasource",
+        "query": "loki",
+        "label": "Logs (Loki) · cliente",
+        "current": {},
+        "refresh": 1,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Selecciona el mismo cliente en los dos desplegables de arriba** (uno para métricas/Mimir, otro para logs/Loki). Son dos backends distintos: cada uno se consulta con su propio datasource por tenant, sin federación entre clientes."
+      }
+    },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "CPU, memoria y disco por máquina",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 3 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "CPU usada (%) por instancia",
+      "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Memoria usada (%) por instancia",
+      "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Disco usado (%) en / por instancia",
+      "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}))",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Estado de scraping (1 = node_exporter respondiendo)",
+      "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${mimir_ds}" },
+          "expr": "up{job=\"node\"}",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Logs",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Logs de sistema (journald)",
+      "datasource": { "type": "loki", "uid": "${loki_ds}" },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 21 },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "${loki_ds}" },
+          "expr": "{job=\"journald\"}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Logs de Nginx (access + error, solo VM1)",
+      "datasource": { "type": "loki", "uid": "${loki_ds}" },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 21 },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "${loki_ds}" },
+          "expr": "{job=\"nginx\"}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+---
+- name: recargar nftables
+  command: nft -f /etc/nftables.conf
+  changed_when: false

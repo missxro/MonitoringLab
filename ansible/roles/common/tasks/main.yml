@@ -1,0 +1,33 @@
+---
+# Bootstrap con "raw": el módulo "apt" necesita python3-apt en la VM, y no
+# podemos garantizar que la box lo traiga ya instalado. "raw" no depende
+# de nada en el destino salvo un shell por SSH, así que es el único punto
+# de este playbook que no es plenamente idempotente en su salida (siempre
+# se reporta como "changed"), pero es seguro ejecutarlo tantas veces como
+# haga falta.
+- name: "Bootstrap: asegurar python3-apt (lo necesita el módulo 'apt')"
+  raw: test -e /usr/lib/python3/dist-packages/apt || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -qq -y python3-apt)
+  changed_when: false
+
+- name: Actualizar caché de apt
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Paquetes base
+  apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+
+- name: Comprobar zona horaria actual
+  command: timedatectl show --property=Timezone --value
+  register: _tz
+  changed_when: false
+
+- name: Fijar zona horaria a UTC
+  command: timedatectl set-timezone UTC
+  when: _tz.stdout != "UTC"
+  # UTC en las 7 VMs para que las marcas de tiempo de métricas y logs
+  # coincidan sin conversiones al compararlas en Grafana.

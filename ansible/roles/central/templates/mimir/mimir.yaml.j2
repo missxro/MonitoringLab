@@ -1,0 +1,86 @@
+# Gestionado por Ansible (rol "central"). No editar a mano.
+#
+# Modo monolítico (-target=all, un solo proceso) con multitenancy activada.
+# Backend de almacenamiento: filesystem, no S3. Es una decisión deliberada:
+# con una sola instancia de Mimir y sin necesidad de alta disponibilidad
+# (la propia central ya es un punto único, ver README), un backend S3/MinIO
+# solo añadiría un contenedor más sin aportar nada aquí. filesystem es el
+# backend oficialmente soportado por Mimir para este escenario de
+# instancia única, y sigue siendo trivialmente reemplazable por S3 el día
+# que este laboratorio necesite escalar.
+multitenancy_enabled: true
+
+server:
+  http_listen_port: 9009
+  grpc_listen_port: 9095
+  log_level: info
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data/common
+
+blocks_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/blocks
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/ruler
+
+alertmanager_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/alertmanager-storage
+
+alertmanager:
+  data_dir: /data/alertmanager
+  sharding_ring:
+    kvstore:
+      store: inmemory
+
+# Instancia única: sin Consul/memberlist, el anillo vive solo en memoria.
+# Es la configuración que la propia documentación de Mimir recomienda para
+# una sola réplica (desarrollo o laboratorio), y es explícitamente NO apta
+# para alta disponibilidad (ver README).
+ingester:
+  ring:
+    kvstore:
+      store: inmemory
+    replication_factor: 1
+
+distributor:
+  ring:
+    kvstore:
+      store: inmemory
+
+store_gateway:
+  sharding_ring:
+    kvstore:
+      store: inmemory
+    replication_factor: 1
+
+ruler:
+  ring:
+    kvstore:
+      store: inmemory
+
+# Límites de ingesta: existen y son finitos a propósito (ver validación #7:
+# qué pasa cuando un gateway se restaura tras una caída y Alloy vacía su
+# WAL de golpe). No son "ilimitados".
+limits:
+  ingestion_rate: 8000
+  ingestion_burst_size: 16000
+  max_global_series_per_user: 100000
+  native_histograms_ingestion_enabled: true

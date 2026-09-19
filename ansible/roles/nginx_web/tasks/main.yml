@@ -1,0 +1,23 @@
+---
+# Nginx de demostración en las VM1 de cada cliente: su único propósito es
+# producir access.log/error.log reales que Alloy pueda recoger y enviar a
+# Loki, y dar algo a lo que lanzar peticiones durante la validación.
+
+- name: Instalar nginx
+  apt:
+    name: nginx
+    state: present
+
+- name: Página de demostración
+  template:
+    src: index.html.j2
+    dest: /var/www/html/index.html
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: nginx habilitado y arrancado
+  systemd:
+    name: nginx
+    enabled: true
+    state: started
