@@ -21,7 +21,7 @@ lab:
     node_exporter: "1.12.1"              # prometheus/node_exporter
     mimir: "3.2.1"                       # grafana/mimir (imagen docker)
     loki: "3.7.8"                        # grafana/loki (imagen docker)
-    grafana: "13.2.2"                    # grafana/grafana-oss (imagen docker)
+    grafana: "13.0.2"                    # grafana/grafana-oss (imagen docker)
     nginx: "1.31.6"                      # nginx (imagen docker, proxy central)
     nginx_client_web: "1.26"             # nginx del paquete Debian, en cliente-*-vm1 (sitio demo)
 

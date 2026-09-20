@@ -10,12 +10,11 @@ services:
     volumes:
       - ./config/mimir.yaml:/etc/mimir/mimir.yaml:ro
       - mimir-data:/data
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9009/ready"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+    # Las imágenes oficiales de mimir y loki son "distroless": no traen
+    # wget, ni shell, ni ninguna otra herramienta con la que ejecutar un
+    # healthcheck desde dentro del contenedor. Los servicios que dependen
+    # de ellas usan "service_started" en vez de "service_healthy" (ver más
+    # abajo).
     restart: unless-stopped
     networks: [monitoring]
 
@@ -25,12 +24,6 @@ services:
     volumes:
       - ./config/loki.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/data
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
     restart: unless-stopped
     networks: [monitoring]
 
@@ -60,9 +53,9 @@ services:
     restart: unless-stopped
     depends_on:
       mimir:
-        condition: service_healthy
+        condition: service_started
       loki:
-        condition: service_healthy
+        condition: service_started
     networks: [monitoring]
 
   proxy:
@@ -80,9 +73,9 @@ services:
       - "443:443"
     depends_on:
       mimir:
-        condition: service_healthy
+        condition: service_started
       loki:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost/healthz"]
       interval: 15s

@@ -3,11 +3,9 @@
 # Mimir, Loki, Grafana y el proxy arranquen con configuración e
 # identidades ya resueltas (nada se genera "en caliente" dentro de la VM).
 
-- name: Paquetes de Docker (empaquetado por Debian, sin repo externo)
+- name: Paquete de Docker Engine (empaquetado por Debian, sin repo externo)
   apt:
-    name:
-      - docker.io
-      - docker-compose-v2
+    name: docker.io
     state: present
 
 - name: Docker habilitado y arrancado
@@ -16,7 +14,28 @@
     enabled: true
     state: started
 
-- name: Estructura de directorios en /opt/monitoring
+# Debian no empaqueta el plugin de Docker Compose v2 (ni en bookworm ni en
+# trixie); solo trae el "docker-compose" v1, ya sin mantenimiento. Se instala
+# el binario oficial del plugin en vez de añadir el repo apt de Docker.
+- name: Directorio de plugins de la CLI de Docker
+  file:
+    path: /usr/local/lib/docker/cli-plugins
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Instalar el plugin de Docker Compose v2
+  get_url:
+    url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-{{ ansible_architecture }}"
+    dest: /usr/local/lib/docker/cli-plugins/docker-compose
+    checksum: "sha256:{{ docker_compose_sha256[ansible_architecture] }}"
+    owner: root
+    group: root
+    mode: "0755"
+    timeout: 60
+
+- name: Estructura de directorios en /opt/monitoring (con secretos, no legibles por "other")
   file:
     path: "/opt/monitoring/{{ item }}"
     state: directory
@@ -24,9 +43,22 @@
     group: root
     mode: "0750"
   loop:
-    - config
     - nginx/auth
     - tls
+
+# loki y grafana corren en sus imágenes oficiales como usuarios no-root
+# (uid 10001 y 472 respectivamente), sin pertenecer al grupo "root" del
+# host: su configuración, al montarse tal cual, tiene que ser legible por
+# "other".
+- name: Estructura de directorios en /opt/monitoring (config montada en contenedores no-root)
+  file:
+    path: "/opt/monitoring/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - config
     - grafana/provisioning/datasources
     - grafana/provisioning/dashboards
 
@@ -55,7 +87,7 @@
   template:
     src: loki/loki.yaml.j2
     dest: /opt/monitoring/config/loki.yaml
-    mode: "0640"
+    mode: "0644" # el contenedor de loki lee este fichero como uid 10001, no root
   notify: reiniciar loki
 
 - name: Renderizar nginx.conf
@@ -86,25 +118,47 @@
   template:
     src: grafana/provisioning/datasources/datasources.yml.j2
     dest: /opt/monitoring/grafana/provisioning/datasources/datasources.yml
-    mode: "0640"
+    mode: "0644" # el contenedor de grafana lee este árbol como uid 472, no root
   notify: reiniciar grafana
 
 - name: Renderizar provider de dashboards de Grafana
   template:
     src: grafana/provisioning/dashboards/dashboards.yml.j2
     dest: /opt/monitoring/grafana/provisioning/dashboards/dashboards.yml
-    mode: "0640"
+    mode: "0644"
   notify: reiniciar grafana
 
 - name: Copiar el dashboard provisionado
   copy:
     src: grafana/provisioning/dashboards/lab-overview.json
     dest: /opt/monitoring/grafana/provisioning/dashboards/lab-overview.json
-    mode: "0640"
+    mode: "0644"
   notify: reiniciar grafana
 
 - name: Aplicar reinicios pendientes antes de (re)levantar la pila
   meta: flush_handlers
+
+# El volumen nombrado "monitoring_loki-data" lo crea el driver "local" de
+# Docker con dueño root la primera vez, pero loki corre como uid 10001 (no
+# root) y necesita escribir en él (p.ej. /data/rules). Se fuerza su
+# propietario aquí, antes de arrancar el contenedor, en vez de dejar que
+# loki falle en su primer arranque.
+- name: Crear el volumen de datos de loki (si no existe) para poder fijar su propietario
+  command: docker volume create monitoring_loki-data
+  changed_when: false
+
+- name: Averiguar el mountpoint del volumen de datos de loki
+  command: docker volume inspect monitoring_loki-data
+  register: _loki_volume_inspect
+  changed_when: false
+
+- name: "Loki corre como uid 10001 (no root): el volumen debe ser suyo"
+  file:
+    path: "{{ (_loki_volume_inspect.stdout | from_json)[0].Mountpoint }}"
+    state: directory
+    owner: "10001"
+    group: "10001"
+    recurse: true
 
 - name: Descargar las imágenes fijadas (no cambia nada si ya están)
   command: docker compose pull
